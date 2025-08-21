@@ -44,6 +44,12 @@ export default function TabLayout() {
       }}
     >
       <Tabs.Screen
+        name="index"
+        options={{
+          href: null, // This hides the index tab from navigation
+        }}
+      />
+      <Tabs.Screen
         name="forum"
         options={{
           title: 'Forum',
