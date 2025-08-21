@@ -1,7 +1,7 @@
 import { router, useFocusEffect } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { apiService, Category, Discussion, User } from '../services/api';
+import { ActivityIndicator, Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View, TextInput } from 'react-native';
+import { apiService, Category, Discussion, User, Reply } from '../services/api';
 import { eventBus, EVENTS } from '../services/eventBus';
 
 export default function ForumScreen() {
@@ -11,6 +11,11 @@ export default function ForumScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [selectedDiscussion, setSelectedDiscussion] = useState<Discussion | null>(null);
+  const [replies, setReplies] = useState<Reply[]>([]);
+  const [replyContent, setReplyContent] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [discussionLoading, setDiscussionLoading] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -102,6 +107,60 @@ export default function ForumScreen() {
     return `${Math.floor(diffInSeconds / 86400)}d ago`;
   };
 
+  const capitalizeFirstWord = (title: string) => {
+    if (!title) return title;
+    return title.charAt(0).toUpperCase() + title.slice(1);
+  };
+
+  const loadDiscussionDetails = async (discussionId: number) => {
+    try {
+      setDiscussionLoading(true);
+      const [discussionData, repliesData] = await Promise.all([
+        apiService.getDiscussion(discussionId),
+        apiService.getReplies(discussionId)
+      ]);
+      setSelectedDiscussion(discussionData);
+      setReplies(Array.isArray(repliesData) ? repliesData : []);
+    } catch (err) {
+      console.error('Error loading discussion details:', err);
+      Alert.alert('Error', 'Failed to load discussion details');
+    } finally {
+      setDiscussionLoading(false);
+    }
+  };
+
+  const handleDiscussionClick = (discussion: Discussion) => {
+    setSelectedDiscussion(discussion);
+    loadDiscussionDetails(discussion.id);
+  };
+
+  const handleBackToDiscussions = () => {
+    setSelectedDiscussion(null);
+    setReplies([]);
+    setReplyContent('');
+  };
+
+  const handleReply = async () => {
+    if (!replyContent.trim() || !selectedDiscussion) {
+      Alert.alert('Error', 'Please enter a reply');
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      await apiService.createReply(selectedDiscussion.id, replyContent.trim());
+      setReplyContent('');
+      Alert.alert('Success', 'Reply posted successfully!');
+      // Reload discussion details
+      loadDiscussionDetails(selectedDiscussion.id);
+    } catch (err: any) {
+      console.error('Error posting reply:', err);
+      Alert.alert('Error', err?.message || 'Failed to post reply');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Logout',
@@ -155,28 +214,6 @@ export default function ForumScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with user info and logout */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Forum</Text>
-        <View style={styles.userInfo}>
-          {currentUser ? (
-            <View style={styles.userSection}>
-              <Text style={styles.welcomeText}>Welcome, {currentUser.username}</Text>
-              <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-                <Text style={styles.logoutText}>Logout</Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <TouchableOpacity 
-              style={styles.loginButton} 
-              onPress={() => router.push('/login')}
-            >
-              <Text style={styles.loginText}>Login</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-
       <View style={styles.forumLayout}>
         <View style={styles.categoriesContainer}>
           <Text style={styles.sectionTitle}>Categories</Text>
@@ -221,30 +258,125 @@ export default function ForumScreen() {
         </View>
         
         <View style={styles.postsContainer}>
-          <Text style={styles.sectionTitle}>{getSelectedCategoryName()}</Text>
-          <ScrollView>
-            {discussions.map((discussion) => (
-              <TouchableOpacity 
-                key={discussion.id} 
-                style={styles.discussionCard}
-                onPress={() => router.push(`/discussion/${discussion.id}` as any)}
-              >
-                <View style={styles.discussionHeader}>
-                  <Text style={styles.discussionTitle}>{discussion.title}</Text>
-                  <Text style={styles.discussionMeta}>
-                    by {discussion.author?.username} • {formatTimeAgo(discussion.created_at)}
-                  </Text>
-                </View>
-                <Text style={styles.discussionPreview} numberOfLines={2}>
-                  {discussion.content || 'No preview available'}
-                </Text>
-                <View style={styles.discussionFooter}>
-                  <Text style={styles.replyCount}>{discussion.reply_count || 0} replies</Text>
-                  <Text style={styles.viewCount}>{discussion.views || 0} views</Text>
-                </View>
+          {selectedDiscussion ? (
+            // Discussion Detail View
+            <View style={styles.discussionDetailContainer}>
+              <TouchableOpacity style={styles.backButton} onPress={handleBackToDiscussions}>
+                <Text style={styles.backButtonText}>← Back to Discussions</Text>
               </TouchableOpacity>
-            ))}
-          </ScrollView>
+              
+              {discussionLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#007AFF" />
+                  <Text style={styles.loadingText}>Loading Discussion...</Text>
+                </View>
+              ) : (
+                <ScrollView style={styles.discussionDetailScroll}>
+                  {/* Discussion Header */}
+                  <View style={styles.discussionDetailHeader}>
+                    <View style={styles.categoryBadge}>
+                      <Text style={styles.categoryBadgeText}>{selectedDiscussion.category?.name}</Text>
+                    </View>
+                    
+                    <Text style={styles.discussionDetailTitle}>{capitalizeFirstWord(selectedDiscussion.title)}</Text>
+                    
+                    <View style={styles.authorInfo}>
+                      <Text style={styles.authorName}>
+                        by {selectedDiscussion.author?.first_name} {selectedDiscussion.author?.last_name} (@{selectedDiscussion.author?.username})
+                      </Text>
+                      <Text style={styles.timestamp}>
+                        {formatTimeAgo(selectedDiscussion.created_at)} • {selectedDiscussion.views} views
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Discussion Content */}
+                  <View style={styles.discussionContent}>
+                    <Text style={styles.discussionContentText}>{selectedDiscussion.content}</Text>
+                  </View>
+
+                  {/* Replies Section */}
+                  <View style={styles.repliesSection}>
+                    <Text style={styles.repliesTitle}>
+                      Replies ({replies.length})
+                    </Text>
+                    
+                    {replies.map((reply) => (
+                      <View key={reply.id} style={styles.replyContainer}>
+                        <View style={styles.replyHeader}>
+                          <Text style={styles.replyAuthor}>
+                            {reply.author?.first_name} {reply.author?.last_name} (@{reply.author?.username})
+                          </Text>
+                          <Text style={styles.replyTimestamp}>
+                            {formatTimeAgo(reply.created_at)}
+                          </Text>
+                        </View>
+                        <Text style={styles.replyContent}>{reply.content}</Text>
+                      </View>
+                    ))}
+                    
+                    {replies.length === 0 && (
+                      <Text style={styles.noReplies}>No replies yet. Be the first to reply!</Text>
+                    )}
+                  </View>
+                </ScrollView>
+              )}
+              
+              {/* Reply Input */}
+              {!discussionLoading && (
+                <View style={styles.replyInputContainer}>
+                  <TextInput
+                    style={styles.replyInput}
+                    placeholder="Write a reply..."
+                    value={replyContent}
+                    onChangeText={setReplyContent}
+                    multiline
+                    numberOfLines={3}
+                  />
+                  <TouchableOpacity
+                    style={[styles.replyButton, submitting && styles.replyButtonDisabled]}
+                    onPress={handleReply}
+                    disabled={submitting}
+                  >
+                    <Text style={styles.replyButtonText}>
+                      {submitting ? 'Posting...' : 'Reply'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+            </View>
+          ) : (
+            // Discussions List View
+            <>
+              <Text style={styles.sectionTitle}>{getSelectedCategoryName()}</Text>
+              <ScrollView>
+                {discussions.map((discussion) => (
+                  <TouchableOpacity 
+                    key={discussion.id} 
+                    style={styles.discussionCard}
+                    onPress={() => handleDiscussionClick(discussion)}
+                  >
+                    <View style={styles.discussionHeader}>
+                      <View style={styles.discussionTitleContainer}>
+                        <Text style={styles.discussionIcon}>💬</Text>
+                        <Text style={styles.discussionTitle}>{capitalizeFirstWord(discussion.title)}</Text>
+                      </View>
+                      <Text style={styles.discussionMeta}>
+                        by {discussion.author?.username} • {formatTimeAgo(discussion.created_at)}
+                      </Text>
+                    </View>
+                    <Text style={styles.discussionPreview} numberOfLines={2}>
+                      {discussion.content || 'No preview available'}
+                    </Text>
+                    <View style={styles.discussionFooter}>
+                      <Text style={styles.replyCount}>{discussion.reply_count || 0} replies</Text>
+                      <Text style={styles.viewCount}>{discussion.views || 0} views</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            </>
+          )}
         </View>
       </View>
     </View>
@@ -413,11 +545,20 @@ const styles = StyleSheet.create({
   discussionHeader: {
     marginBottom: 8,
   },
+  discussionTitleContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  discussionIcon: {
+    fontSize: 16,
+    marginRight: 8,
+  },
   discussionTitle: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#333',
-    marginBottom: 4,
+    flex: 1,
   },
   discussionMeta: {
     fontSize: 12,
@@ -442,5 +583,166 @@ const styles = StyleSheet.create({
   viewCount: {
     fontSize: 12,
     color: '#999',
+  },
+  discussionDetailContainer: {
+    flex: 1,
+  },
+  backButton: {
+    marginBottom: 15,
+    paddingVertical: 8,
+  },
+  backButtonText: {
+    color: '#007AFF',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  discussionDetailScroll: {
+    flex: 1,
+  },
+  discussionDetailHeader: {
+    backgroundColor: 'white',
+    padding: 20,
+    marginBottom: 10,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  categoryBadge: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    alignSelf: 'flex-start',
+    marginBottom: 10,
+  },
+  categoryBadgeText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  discussionDetailTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 10,
+  },
+  authorInfo: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  authorName: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#999',
+  },
+  discussionContent: {
+    backgroundColor: 'white',
+    padding: 20,
+    marginBottom: 10,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  discussionContentText: {
+    fontSize: 16,
+    lineHeight: 24,
+    color: '#333',
+  },
+  repliesSection: {
+    backgroundColor: 'white',
+    padding: 20,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  repliesTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 15,
+  },
+  replyContainer: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#eee',
+    paddingBottom: 15,
+    marginBottom: 15,
+  },
+  replyHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  replyAuthor: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  replyTimestamp: {
+    fontSize: 12,
+    color: '#999',
+  },
+  replyContent: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#333',
+  },
+  noReplies: {
+    fontSize: 14,
+    color: '#999',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 20,
+  },
+  replyInputContainer: {
+    backgroundColor: 'white',
+    padding: 15,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  replyInput: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 10,
+    marginRight: 10,
+    maxHeight: 100,
+    fontSize: 16,
+  },
+  replyButton: {
+    backgroundColor: '#007AFF',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  replyButtonDisabled: {
+    backgroundColor: '#ccc',
+  },
+  replyButtonText: {
+    color: 'white',
+    fontWeight: '600',
   },
 });

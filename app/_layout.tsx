@@ -31,7 +31,8 @@ export default function TabLayout() {
           borderBottomColor: '#dee2e6',
           elevation: 0,
           shadowOpacity: 0,
-          paddingLeft: 50,
+          paddingHorizontal: 50,
+          justifyContent: 'center',
         },
         tabBarItemStyle: {
           paddingVertical: 8,
@@ -65,6 +66,27 @@ export default function TabLayout() {
           tabBarIcon: ({ color }) => (
             <Text style={{ fontSize: 24, color }}>➕</Text>
           ),
+        }}
+      />
+      <Tabs.Screen
+        name="login"
+        options={{
+          title: 'Login',
+          tabBarIcon: ({ color }) => (
+            <Ionicons name="person-circle" size={20} color={color} />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="discussion"
+        options={{
+          href: null, // This hides the discussion folder from navigation
+        }}
+      />
+      <Tabs.Screen
+        name="discussion/[id]"
+        options={{
+          href: null, // This hides the dynamic discussion route from navigation
         }}
       />
     </Tabs>
